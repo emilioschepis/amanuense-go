@@ -2,6 +2,7 @@ package amanuense
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -67,6 +68,19 @@ func HandleMessage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// extractSampleRate reads bytes from an OGG/OPUS file and explores relevant
+// bytes to extract the sample rate of the file.
+// https://wiki.xiph.org/OggOpus#ID_Header
+func extractSampleRate(data []byte) uint32 {
+	// Skip 40 bits (28 of the OGG header + 12 of the Opus header) and read the
+	// next 4 bits to extract the sample rate as an int.
+	if len(data) < 44 {
+		log.Panicf("unexpected data length: %v", len(data))
+	}
+
+	return binary.LittleEndian.Uint32(data[40:44])
+}
+
 func handleVoiceMessage(bot *tgbotapi.BotAPI, chatID int64, voice *tgbotapi.Voice) {
 	if voice.Duration > 60 {
 		sendMessage(bot, chatID, "Trascrivo solo messaggi fino a 60 secondi!")
@@ -110,6 +124,8 @@ func transcribeVoice(data []byte) (*transcription, error) {
 	// TODO: Understand the `context` concept.
 	ctx := context.Background()
 
+	sr := extractSampleRate(data)
+
 	sc, err := speech.NewClient(ctx)
 	if err != nil {
 		log.Printf("could not instantiate speech client: %v\n", err)
@@ -119,7 +135,7 @@ func transcribeVoice(data []byte) (*transcription, error) {
 
 	config := &speechpb.RecognitionConfig{
 		Encoding:        speechpb.RecognitionConfig_OGG_OPUS,
-		SampleRateHertz: 48000, // telegram's default sample rate
+		SampleRateHertz: int32(sr),
 		LanguageCode:    "it-IT",
 	}
 
